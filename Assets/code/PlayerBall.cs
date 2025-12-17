@@ -5,7 +5,7 @@ public class PlayerBall : MonoBehaviour
 {
     [Header("Shoot Settings")]
     public float shootPower = 6f;     // 発射力
-    public float maxScale = 2f;       // 最大スケール
+    public float maxScale = 0.1f;       // 最大スケール
 
     [Header("Physics Settings")]
     public float friction = 0.995f;   // 摩擦係数
@@ -18,7 +18,7 @@ public class PlayerBall : MonoBehaviour
     private Rigidbody2D rb;
     private Vector2 startPos;
     private bool isDragging = false;
-    private Vector3 targetScale = Vector3.one / 2f;
+    private Vector3 targetScale = Vector3.one / 20f;
 
     void Awake()
     {
@@ -46,8 +46,8 @@ public class PlayerBall : MonoBehaviour
             float dragPower = dir.magnitude;
 
             // 공 크기 변화
-            float scale = 1f + Mathf.Clamp(dragPower / 2f, 0f, maxScale - 1f);
-            targetScale = Vector3.one * scale;
+            float scale =  Mathf.Clamp(dragPower / 2f, 0f, maxScale - 1f);
+            targetScale = Vector3.one * 0.1f;
 
             rb.velocity = Vector2.zero;
         }
@@ -59,7 +59,7 @@ public class PlayerBall : MonoBehaviour
             Vector2 dir = startPos - endPos;
 
             rb.velocity = dir.normalized * dir.magnitude * shootPower;
-            targetScale = Vector3.one / 2f;
+            targetScale = Vector3.one / 20f;
             isDragging = false;
         }
 

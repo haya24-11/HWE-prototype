@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿/*
+using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
 
@@ -59,6 +60,52 @@ public class PlayerHUD : MonoBehaviour
             xpSlider.minValue = 0;
             xpSlider.maxValue = levelSystem.xpToNext;
             xpSlider.value = levelSystem.currentXP;
+        }
+    }
+}
+*/
+
+using UnityEngine;
+using TMPro;
+using UnityEngine.UI;
+
+public class PlayerHUD : MonoBehaviour
+{
+    [Header("Refs")]
+    public PlayerStats stats;
+    public PlayerLevelSystem level;
+
+    [Header("UI")]
+    public TMP_Text hpText;
+    public TMP_Text atkText;
+    public TMP_Text xpText;
+    public TMP_Text speedText;
+    public Slider xpSlider;
+
+    void Awake()
+    {
+        if (stats == null) stats = FindObjectOfType<PlayerStats>();
+        if (level == null) level = FindObjectOfType<PlayerLevelSystem>();
+    }
+
+    void Update()
+    {
+        if (stats != null)
+        {
+            if (hpText != null) hpText.text = $"HP {stats.currentHP}/{stats.maxHP}";
+            if (atkText != null) atkText.text = $"ATK {stats.attackPower}";
+            if (speedText != null) speedText.text = $"SPEED {stats.moveSpeed}";
+        }
+
+        if (level != null)
+        {
+            if (xpText != null) xpText.text = $"XP {level.currentXP}/{level.xpToNext} (LV {level.level})";
+
+            if (xpSlider != null)
+            {
+                xpSlider.maxValue = level.xpToNext;
+                xpSlider.value = level.currentXP;
+            }
         }
     }
 }

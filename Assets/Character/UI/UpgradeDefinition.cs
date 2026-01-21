@@ -14,5 +14,5 @@ public class UpgradeDefinition : ScriptableObject
     public int maxLevel = 5;
 
     [Header("Value Per Level")]
-    public float valuePerLevel = 1f; // 공격력은 +1, 이동속도는 +0.5 같은 식
+    public float valuePerLevel = 1f; // 攻撃力は+1、移動速度は+0.5といった具合
 }

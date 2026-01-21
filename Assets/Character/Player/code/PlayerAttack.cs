@@ -5,35 +5,37 @@ public class PlayerAttack : MonoBehaviour
     [SerializeField] private PlayerStats stats;
     [SerializeField] private bool debugLog = true;
 
+    [Header("Knockback")]
+    public float knockbackBase = 2f;
+    public float knockbackPerATK = 1.5f;
+    public float maxKnockback = 8f;
+
     void Awake()
     {
         if (stats == null)
             stats = GetComponentInParent<PlayerStats>();
     }
 
-    void TryDamage(Collider2D col)
+    void TryHit(Collider2D col)
     {
         // ✅ 자식 콜라이더를 맞춰도 Enemy(부모)를 찾음
         Enemy enemy = col.GetComponentInParent<Enemy>();
         if (enemy == null) return;
 
-        int dmg = (stats != null) ? stats.attackPower : 1;
+        int atk = (stats != null) ? stats.attackPower : 1;
 
-        if (debugLog)
-            Debug.Log($"[PlayerAttack] Hit {col.name} -> Enemy:{enemy.name}, dmg:{dmg}");
+        // ✅ ダメージを先に
+        enemy.TakeDamage(atk);
 
-        enemy.TakeDamage(dmg);
+        // ✅ 押し目買い（四百） - プレーヤー - > 敵の方向
+        Vector2 dir = ((Vector2)enemy.transform.position - (Vector2)transform.position).normalized;
+
+        float kb = knockbackBase + atk * knockbackPerATK;
+        kb = Mathf.Min(kb, maxKnockback);
+
+        enemy.LaunchByPlayer(dir * kb);
     }
 
-    // ✅ Trigger 방식
-    void OnTriggerEnter2D(Collider2D other)
-    {
-        TryDamage(other);
-    }
-
-    // ✅ Collision 방식(Trigger 체크 안 했을 때도 대응)
-    void OnCollisionEnter2D(Collision2D collision)
-    {
-        TryDamage(collision.collider);
-    }
+    void OnTriggerEnter2D(Collider2D other) => TryHit(other);
+    void OnCollisionEnter2D(Collision2D collision) => TryHit(collision.collider);
 }

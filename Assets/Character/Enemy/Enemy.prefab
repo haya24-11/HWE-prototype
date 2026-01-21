@@ -31,7 +31,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 3.2428, y: -0.2015, z: 0}
-  m_LocalScale: {x: 0.049999997, y: 0.045546424, z: 0.111061744}
+  m_LocalScale: {x: 0.04, y: 0.03643714, z: 0.088849396}
   m_ConstrainProportionsScale: 1
   m_Children: []
   m_Father: {fileID: 0}
@@ -131,23 +131,21 @@ MonoBehaviour:
   maxSpeed: 0.9
   stopDistance: 3
   stopChaseTime: 1
-  maxHP: 2
+  maxHP: 30
   currentHP: 0
   hitCooldown: 0.1
-  launchedTime: 0.3
-  damageSpeedThreshold: 1
-  xpReward: 0
+  hitFlashTime: 0.1
+  launchedTime: 3
+  damageSpeedThreshold: 0
+  xpReward: 2
   pinballEnabled: 1
-  pinballBaseKick: 2.34
-  pinballKickBySpeed: 0.1
-  pinballMinRelSpeed: 0.01
-  pinballMaxSpeed: 50
-  chainRedirect: 1
-  redirectRadius: 10
-  redirectBlend: 0.52
-  enemyMask:
-    serializedVersion: 2
-    m_Bits: 0
+  pinballMaxSpeed: 10
+  enemyCollisionDamping: 0.1
+  separationRadius: 0.81
+  separationForce: 1.96
+  isBoss: 0
+  bossMoveSpeed: 2.5
+  bossStunTime: 0.3
 --- !u!60 &-4161638840515417038
 PolygonCollider2D:
   m_ObjectHideFlags: 0
@@ -547,4 +545,4 @@ CircleCollider2D:
   m_UsedByComposite: 0
   m_Offset: {x: 0, y: 0}
   serializedVersion: 2
-  m_Radius: 7
+  m_Radius: 12.8

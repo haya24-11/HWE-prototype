@@ -2,41 +2,68 @@
 
 public class PlayerStats : MonoBehaviour
 {
-    [Header("Combat")]
+    [Header("HP")]
+    public int maxHP = 10;
+    public int currentHP;
+
+    [Header("Stats")]
     public int attackPower = 1;
+    public float moveSpeed = 5f;
 
-    [Header("Scaling (optional)")]
-    public int attackPerLevel = 1;   // 레벨업 1회당 공격력 증가량
-    public bool applyScalingFromLevelSystem = true;
+    [Header("Damage")]
+    public float invincibleTime = 0.5f;
+    private float lastDamagedTime = -999f;
 
-    void Start()
+    void Awake()
     {
-        // 레벨 시스템이 있으면 이벤트로 연결해서 자동으로 공격력 올리기
-        if (applyScalingFromLevelSystem && PlayerLevelSystem.Instance != null)
-        {
-            // 시작 레벨 반영(원하면)
-            ApplyAttackFromLevel(PlayerLevelSystem.Instance.level);
-
-            PlayerLevelSystem.Instance.OnLevelUp += HandleLevelUp;
-        }
+        currentHP = maxHP;
     }
 
-    void OnDestroy()
+    public bool CanTakeDamage()
     {
-        if (PlayerLevelSystem.Instance != null)
-            PlayerLevelSystem.Instance.OnLevelUp -= HandleLevelUp;
+        return Time.time - lastDamagedTime >= invincibleTime;
     }
 
-    void HandleLevelUp(int newLevel)
+    public void TakeDamage(int dmg)
     {
-        ApplyAttackFromLevel(newLevel);
-        // 또는 “레벨업 때마다 +attackPerLevel” 방식으로 하고싶으면 아래 한 줄로 대체:
-        // attackPower += attackPerLevel;
+        if (!CanTakeDamage()) return;
+        if (dmg <= 0) return;
+
+        lastDamagedTime = Time.time;
+        currentHP = Mathf.Max(0, currentHP - dmg);
+
+        Debug.Log($"Player HP: {currentHP}/{maxHP}");
+
+        if (currentHP <= 0)
+            Die();
     }
 
-    void ApplyAttackFromLevel(int level)
+    public void Heal(int amount)
     {
-        // 기본 공격력(1) + (레벨-1)*증가량
-        attackPower = 1 + (level - 1) * attackPerLevel;
+        if (amount <= 0) return;
+        currentHP = Mathf.Min(maxHP, currentHP + amount);
+    }
+
+    void Die()
+    {
+        Debug.Log("Player Dead");
+        // ゲームオーバー処理
+    }
+
+    /* ===== レベルアップ補償 ===== */
+    public void AddMaxHP(int amount)
+    {
+        maxHP += amount;
+        currentHP = Mathf.Min(currentHP + amount, maxHP);
+    }
+
+    public void AddAttack(int amount)
+    {
+        attackPower += amount;
+    }
+
+    public void AddMoveSpeed(float amount)
+    {
+        moveSpeed += amount;
     }
 }

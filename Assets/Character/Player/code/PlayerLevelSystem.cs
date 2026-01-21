@@ -5,12 +5,12 @@ public class PlayerLevelSystem : MonoBehaviour
 {
     public static PlayerLevelSystem Instance { get; private set; }
 
+    [Header("Level")]
     public int level = 1;
     public int currentXP = 0;
     public int xpToNext = 10;
 
-    public int baseXpToNext = 10;
-    public int xpIncreasePerLevel = 5;
+    public event Action OnLevelUp;
 
     public event Action<int> OnLevelUp; // ✅ 추가
 
@@ -31,11 +31,10 @@ public class PlayerLevelSystem : MonoBehaviour
         {
             currentXP -= xpToNext;
             level++;
-            Recalc();
+            xpToNext = Mathf.RoundToInt(xpToNext * 1.5f); // 成長曲線(希望すれば調節)
 
-            OnLevelUp?.Invoke(level); // ✅ 추가
+            OnLevelUp?.Invoke();
         }
-    }
 
     void Recalc()
     {

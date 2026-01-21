@@ -1,9 +1,11 @@
-﻿/*
+﻿using System.Collections;
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody2D), typeof(Collider2D))]
 public class Enemy : MonoBehaviour
 {
+    private Vector2 prevVelocity;
+
     private EnemySpawner spawner;
     private Rigidbody2D rb;
     private Transform player;
@@ -27,6 +29,11 @@ public class Enemy : MonoBehaviour
     private float lastHitTime = 0f;
     public float hitCooldown = 0.1f;
 
+    [Header("Hit Effect")]
+    public float hitFlashTime = 0.1f;
+    private Color originalColor;
+    private Coroutine hitCoroutine;
+
     [Header("Launch State")]
     public float launchedTime = 0.3f;
     private float launchedTimer = -10f;
@@ -40,18 +47,45 @@ public class Enemy : MonoBehaviour
     // ✅ 핀볼 느낌(범퍼 킥) 파라미터
     [Header("Pinball Bounce")]
     public bool pinballEnabled = true;
-
-    [Tooltip("충돌 시 기본으로 추가되는 밀어내기(임펄스)")]
-    public float pinballBaseKick = 2.5f;
-
-    [Tooltip("충돌 상대 속도(노멀 방향)에 비례해 추가되는 킥")]
-    public float pinballKickBySpeed = 0.6f;
-
-    [Tooltip("이 속도 이상으로 부딪힐 때만 킥 적용(너무 잔잔한 충돌은 제외)")]
-    public float pinballMinRelSpeed = 0.5f;
-
-    [Tooltip("핀볼 튕김 후 속도 상한(너무 빨라지는거 방지)")]
     public float pinballMaxSpeed = 18f;
+
+    [Header("Enemy Collision Damping")]
+    [Range(0.1f, 1f)]
+    public float enemyCollisionDamping = 0.5f;
+
+    [Header("Separation")]
+    public float separationRadius = 1.2f;
+    public float separationForce = 5f;
+
+    [Header("Boss")]
+    public bool isBoss = false;
+
+    [Header("Boss Move")]
+    public float bossMoveSpeed = 2.5f;
+
+    private Vector2 bossDesiredVelocity;
+
+    [Header("Boss Stun")]
+    public float bossStunTime = 0.3f;
+    private float bossStunEndTime = -10f;
+
+
+    private bool isDying = false;
+
+    public IEnumerator DelayedDie(float delay)
+    {
+        if (isDying) yield break;
+        isDying = true;
+
+        // 디버그로 확인
+        Debug.Log($"{name} will die after {delay}s");
+
+        yield return new WaitForSeconds(delay);
+
+        Die();
+    }
+
+
 
     void Awake()
     {
@@ -68,6 +102,12 @@ public class Enemy : MonoBehaviour
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
         currentHP = maxHP;
+
+        if (sr != null)
+            originalColor = sr.color;
+
+        if (isBoss)
+            rb.bodyType = RigidbodyType2D.Kinematic;
     }
 
     void Start()
@@ -78,10 +118,33 @@ public class Enemy : MonoBehaviour
 
     void FixedUpdate()
     {
+        ApplySeparation();
+
         if (player == null) return;
+
+        // ===============================
+        // ボス移動
+        // ===============================
+        if (isBoss)
+        {
+            // 硬直中は移動しない
+            if (Time.time < bossStunEndTime)
+            {
+                rb.velocity = Vector2.zero;
+                return;
+            }
+
+            Vector2 dir = ((Vector2)player.position - rb.position).normalized;
+            rb.velocity = dir * bossMoveSpeed;
+            return;
+        }
+
+        // ===============================
+        // 一般モンスター移動
+        // ===============================
         if (Time.time - lastBounceTime < stopChaseTime) return;
 
-        Vector2 playerPos = (Vector2)player.position;
+        Vector2 playerPos = player.position;
         float distance = Vector2.Distance(rb.position, playerPos);
 
         if (distance <= stopDistance)
@@ -90,13 +153,18 @@ public class Enemy : MonoBehaviour
             return;
         }
 
-        Vector2 dir = (playerPos - rb.position).normalized;
-        rb.AddForce(dir * moveForce, ForceMode2D.Force);
+        Vector2 moveDir = (playerPos - rb.position).normalized;
+        rb.AddForce(moveDir * moveForce, ForceMode2D.Force);
 
         if (rb.velocity.magnitude > maxSpeed)
             rb.velocity = rb.velocity.normalized * maxSpeed;
     }
 
+
+
+    /* =========================
+       Launch 関連
+       ========================= */
     public void LaunchByPlayer(Vector2 force)
     {
         rb.velocity = force;
@@ -104,164 +172,105 @@ public class Enemy : MonoBehaviour
         lastBounceTime = Time.time;
     }
 
-    public void SetSpawner(EnemySpawner s) => spawner = s;
-
-    public void TakeDamage(int damage)
+    public void LaunchByEnemy(Vector2 force)
     {
-        if (Time.time - lastHitTime < hitCooldown) return;
-        lastHitTime = Time.time;
-
-        currentHP -= damage;
-
-        if (sr != null)
-        {
-            if (currentHP <= maxHP * 0.5f) sr.color = Color.red;
-            else sr.color = Color.blue;
-        }
-
-        if (currentHP <= 0) Die();
+        rb.velocity = force;
+        launchedTimer = Time.time;
+        lastBounceTime = Time.time;
     }
 
+    public bool IsLaunched() => Time.time - launchedTimer < launchedTime;
+
+    /* =========================
+       衝突処理
+       ========================= */
     void OnCollisionEnter2D(Collision2D collision)
     {
-        // 핀볼 킥: 물리 반사(머티리얼) + 추가 임펄스
-        if (pinballEnabled)
-        {
-            if (collision.gameObject.CompareTag("Wall"))
-            {
-                PinballKickAgainstWall(collision);
-                lastBounceTime = Time.time;
-            }
-            else if (collision.gameObject.CompareTag("Enemy"))
-            {
-                Enemy other = collision.gameObject.GetComponent<Enemy>();
-
-                // ✅ 기존 데미지 룰 유지
-                if (IsLaunched() && rb.velocity.magnitude >= damageSpeedThreshold)
-                {
-                    if (other != null)
-                        other.TakeDamage(1);
-                }
-
-                PinballKickEnemyVsEnemy(collision, other);
-                lastBounceTime = Time.time;
-                return;
-            }
-        }
-
-        // 기존 상태 갱신
-        if (collision.gameObject.CompareTag("Player"))
-        {
-            launchedTimer = Time.time;
-            lastBounceTime = Time.time;
-            return;
-        }
-
-        if (collision.gameObject.CompareTag("Enemy"))
-        {
-            // pinballEnabled=false일 때도 최소한 bounce 타이밍은 유지
-            lastBounceTime = Time.time;
-            return;
-        }
-
-        if (collision.gameObject.CompareTag("Wall"))
-        {
-            lastBounceTime = Time.time;
-        }
-    }
-
-    // ✅ 벽에 부딪힐 때: 접촉 노멀 방향으로 "툭" 밀어내기
-    void PinballKickAgainstWall(Collision2D collision)
-    {
+        if (!collision.gameObject.CompareTag("Enemy")) return;
         if (collision.contactCount == 0) return;
 
-        Vector2 n = collision.GetContact(0).normal.normalized; // 벽 -> 나 방향
-        float relN = Vector2.Dot(rb.velocity, -n);             // 벽 쪽으로 박는 속도(양수면 박고있음)
+        Enemy other = collision.gameObject.GetComponent<Enemy>();
+        if (other == null) return;
 
-        if (relN < pinballMinRelSpeed) return;
+        // ===============================
+        // 両方とも Launch 状態でなければ
+        // ボスと衝突しても何も起こらない
+        // ===============================
+        if (!IsLaunched() && !other.IsLaunched())
+            return;
+            }
+        }
 
-        float kick = pinballBaseKick + relN * pinballKickBySpeed;
-        rb.AddForce(n * kick, ForceMode2D.Impulse);
+        // ===============================
+        // Launch 状態の通常モンスター ↔ ボス
+        // ===============================
 
-        ClampSpeed(rb, pinballMaxSpeed);
-    }
+        // 自分がボス ＆ 相手が通常モンスター ＆ 相手が Launch 状態
+        if (isBoss && !other.isBoss && other.IsLaunched())
+        {
+            // 通常モンスターは n 秒後に死亡
+            other.StartCoroutine(other.DelayedDie(0.5f));
 
-    // ✅ 적-적 충돌: 둘 다 반대로 튕기고, 추가 킥까지(핀볼 범퍼 느낌)
-    // ✅ 적-적 충돌: 둘 다 x,y 방향을 반대로(-velocity)로 뒤집어서 튕기기
-    // ✅ 적-적 충돌: "플레이어에게 날아간 적"이 껴있을 때만 XY 반전 적용
-    // ✅ 적-적 충돌: 둘 다 튕김(반사) + 핀볼 킥
-void PinballKickEnemyVsEnemy(Collision2D collision, Enemy other)
-{
-    if (other == null) return;
+            // ボスはダメージのみ受ける
+            TakeDamage(1);
+            return;
+        }
 
-    Rigidbody2D rb2 = other.GetComponent<Rigidbody2D>();
-    if (rb2 == null) return;
+        // 自分が通常モンスター ＆ 相手がボス ＆ 自分が Launch 状態
+        if (!isBoss && other.isBoss && IsLaunched())
+        {
+            // 自分（通常モンスター）は n 秒後に死亡
+            StartCoroutine(DelayedDie(0.5f));
+
+            // ボスは即ダメージ
+            other.TakeDamage(1);
+            return;
+        }
+
+        // ===============================
+        // 以下：通常モンスター同士のピンボール処理
+        // ===============================
+        if (!pinballEnabled) return;
+
+        // Launch 状態かつ速度が一定以上のときのみ攻撃判定
+        bool isPinballAttack =
+            IsLaunched() &&
+            rb.velocity.magnitude >= damageSpeedThreshold;
+
+        if (!isPinballAttack) return;
+
+        // 相手にダメージ
+        other.TakeDamage(1);
+
+        // ボスが含まれる場合は物理反応を行わない
+        if (isBoss || other.isBoss) return;
+
+        Rigidbody2D rb2 = other.GetComponent<Rigidbody2D>();
+        if (rb2 == null) return;
     if (collision.contactCount == 0) return;
 
     // ✅ 중복 처리 방지(둘 다 처리하면 2번 적용돼서 이상해짐)
     if (rb.GetInstanceID() > rb2.GetInstanceID()) return;
 
-    // 충돌 노멀 (other -> this 방향)
-    Vector2 n = collision.GetContact(0).normal.normalized;
+        // 衝突面の法線ベクトル
+        Vector2 n = collision.GetContact(0).normal.normalized;
 
-    Vector2 v1 = rb.velocity;
-    Vector2 v2 = rb2.velocity;
+        // 速度減衰
+        rb.velocity *= enemyCollisionDamping;
+        rb2.velocity *= enemyCollisionDamping;
 
-    // 상대속도 (서로 박는 정도)
-    Vector2 rel = v1 - v2;
-    float relToward = Vector2.Dot(rel, n); // 음수면 서로 박는 중
+        // 反発力計算
+        float power = Mathf.Max(1.5f, rb.velocity.magnitude * 0.8f);
+        Vector2 impulse = n * power;
 
-    // 너무 잔잔한 충돌이면 무시(원하면 값 조절)
-    if (-relToward < pinballMinRelSpeed) return;
+        // 反発力を加える
+        rb.AddForce(impulse, ForceMode2D.Impulse);
+        rb2.AddForce(-impulse, ForceMode2D.Impulse);
 
-    // ✅ 1) 서로 반사(Reflect)로 튕기게
-    // 반사는 "각자 상대 속도 기준"이 자연스러움
-    Vector2 v1Rel = v1 - v2;
-    Vector2 v2Rel = v2 - v1;
-
-    Vector2 v1Ref = Vector2.Reflect(v1Rel, n) + v2;
-    Vector2 v2Ref = Vector2.Reflect(v2Rel, -n) + v1;
-
-    rb.velocity = v1Ref;
-    rb2.velocity = v2Ref;
-
-    // ✅ 2) 핀볼 범퍼 킥(임펄스) 추가
-    // 기본 킥 + 박는 속도에 비례
-    float kick = pinballBaseKick + (-relToward) * pinballKickBySpeed;
-
-    // "플레이어가 날린 적"이면 더 강하게(원하면 숫자 조절)
-    bool launchedA = IsLaunched();
-    bool launchedB = other.IsLaunched();
-    if (launchedA || launchedB) kick *= 1.3f;
-
-    // 서로 반대 방향으로 팡!
-    rb.AddForce(n * kick, ForceMode2D.Impulse);
-    rb2.AddForce(-n * kick, ForceMode2D.Impulse);
-
-    ClampSpeed(rb, pinballMaxSpeed);
-    ClampSpeed(rb2, pinballMaxSpeed);
-}
-
-
-
-    void ClampSpeed(Rigidbody2D target, float max)
-    {
-        float spd = target.velocity.magnitude;
-        if (spd > max)
-            target.velocity = target.velocity.normalized * max;
+        // 相互に Launch 状態にする
+        LaunchByEnemy(impulse);
+        other.LaunchByEnemy(-impulse);
     }
-
-    public bool IsLaunched() => Time.time - launchedTimer < launchedTime;
-
-    void Die()
-    {
-        if (PlayerLevelSystem.Instance != null)
-            PlayerLevelSystem.Instance.AddXP(xpReward);
-
-        if (spawner != null) spawner.OnEnemyDestroyed();
-        Destroy(gameObject);
-    }
-}
 
 
 */
@@ -276,89 +285,26 @@ public class Enemy : MonoBehaviour
     private Transform player;
     private SpriteRenderer sr;
 
-    [Header("Move Settings")]
-    public float moveForce = 3f;
-    public float maxSpeed = 5f;
-
-    [Header("Chase Settings")]
-    public float stopDistance = 3.0f;
-
-    [Header("Bounce Control")]
-    public float stopChaseTime = 0.2f;
-    private float lastBounceTime = -5f;
-
-    [Header("HP Settings")]
-    public int maxHP = 4;
-    public int currentHP;
-
-    private float lastHitTime = 0f;
-    public float hitCooldown = 0.1f;
-
-    [Header("Launch State")]
-    public float launchedTime = 0.3f;
-    private float launchedTimer = -10f;
-
-    [Header("Damage Condition")]
-    public float damageSpeedThreshold = 2.0f;
-
-    [Header("Rewards")]
-    public int xpReward = 3;
-
-    // ✅ 핀볼 튕김(반사 + 킥)
-    [Header("Pinball Bounce")]
-    public bool pinballEnabled = true;
-    public float pinballBaseKick = 2.5f;
-    public float pinballKickBySpeed = 0.6f;
-    public float pinballMinRelSpeed = 0.5f;
-    public float pinballMaxSpeed = 18f;
-
-    // ✅ A 방식: "튕긴 내 몬스터만" 다음 몬스터로 즉시 꺾기
-    [Header("Chain Redirect (A: only this enemy)")]
-    public bool chainRedirect = true;
-    public float redirectRadius = 10f;
-
-    [Range(0f, 1f)]
-    [Tooltip("1=완전 즉시 방향변경, 0.5=절반만 꺾임")]
-    public float redirectBlend = 1.0f;
-
-    [Tooltip("Enemy 레이어만 체크")]
-    public LayerMask enemyMask;
-
-    void Awake()
+    void OnCollisionStay2D(Collision2D collision)
     {
-        rb = GetComponent<Rigidbody2D>();
-        sr = GetComponentInChildren<SpriteRenderer>();
+        if (isBoss) return;
 
-        rb.mass = 0.5f;
-        rb.gravityScale = 0f;
-        rb.freezeRotation = true;
+        if (!collision.gameObject.CompareTag("Enemy")) return;
+        if (!IsLaunched()) return;
+        if (collision.contactCount == 0) return;
 
-        rb.drag = 0f;
-        rb.angularDrag = 0f;
-        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+        Enemy other = collision.gameObject.GetComponent<Enemy>();
+        if (other == null || other.isBoss) return;
 
-        currentHP = maxHP;
+        Rigidbody2D rb2 = other.GetComponent<Rigidbody2D>();
+        if (rb2 == null) return;
+
+        Vector2 n = collision.GetContact(0).normal.normalized;
+        float push = 0.6f;
+
+        rb.AddForce(n * push, ForceMode2D.Impulse);
+        rb2.AddForce(-n * push, ForceMode2D.Impulse);
     }
-
-    void Start()
-    {
-        GameObject p = GameObject.FindGameObjectWithTag("Player");
-        if (p != null) player = p.transform;
-    }
-
-    void FixedUpdate()
-    {
-        if (player == null) return;
-        if (Time.time - lastBounceTime < stopChaseTime) return;
-
-        Vector2 playerPos = (Vector2)player.position;
-        float distance = Vector2.Distance(rb.position, playerPos);
-
-        if (distance <= stopDistance)
-        {
-            rb.velocity *= 0.9f;
-            return;
-        }
 
         Vector2 dirToPlayer = (playerPos - rb.position).normalized;
         rb.AddForce(dirToPlayer * moveForce, ForceMode2D.Force);
@@ -367,44 +313,31 @@ public class Enemy : MonoBehaviour
             rb.velocity = rb.velocity.normalized * maxSpeed;
     }
 
-    public void LaunchByPlayer(Vector2 force)
-    {
-        rb.velocity = force;
-        launchedTimer = Time.time;
-        lastBounceTime = Time.time;
-    }
-
-    public void SetSpawner(EnemySpawner s) => spawner = s;
-
+    /* =========================
+      ダメージ&エフェクト
+       ========================= */
     public void TakeDamage(int damage)
     {
         if (Time.time - lastHitTime < hitCooldown) return;
         lastHitTime = Time.time;
 
         currentHP -= damage;
+        PlayHitFlash();
 
-        if (sr != null)
+        // ===============================
+        // ボス硬直処理
+        // ===============================
+        if (isBoss)
         {
-            if (currentHP <= maxHP * 0.5f) sr.color = Color.blue;
-            else sr.color = Color.blue;
+            bossStunEndTime = Time.time + bossStunTime;
         }
 
-        if (currentHP <= 0) Die();
+        if (PlayerCombo.Instance != null)
+            PlayerCombo.Instance.AddCombo();
+
+        if (currentHP <= 0)
+            Die();
     }
-
-    void OnCollisionEnter2D(Collision2D collision)
-    {
-        if (!pinballEnabled)
-        {
-            if (collision.gameObject.CompareTag("Player"))
-                launchedTimer = Time.time;
-
-            if (collision.gameObject.CompareTag("Player") ||
-                collision.gameObject.CompareTag("Enemy") ||
-                collision.gameObject.CompareTag("Wall"))
-            {
-                lastBounceTime = Time.time;
-            }
             return;
         }
 
@@ -415,146 +348,72 @@ public class Enemy : MonoBehaviour
             return;
         }
 
-        if (collision.gameObject.CompareTag("Enemy"))
-        {
-            Enemy other = collision.gameObject.GetComponent<Enemy>();
-
-            // ✅ 데미지 규칙 유지
-            if (IsLaunched() && rb.velocity.magnitude >= damageSpeedThreshold)
-            {
-                if (other != null)
-                    other.TakeDamage(1);
-            }
-
-            PinballKickEnemyVsEnemy(collision, other);
-            lastBounceTime = Time.time;
-            return;
-        }
-
-        if (collision.gameObject.CompareTag("Player"))
-        {
-            launchedTimer = Time.time;
-            lastBounceTime = Time.time;
-        }
-    }
-
-    void PinballKickAgainstWall(Collision2D collision)
+    void PlayHitFlash()
     {
-        if (collision.contactCount == 0) return;
+        if (sr == null) return;
 
-        Vector2 n = collision.GetContact(0).normal.normalized; // 벽 -> 나 방향
-        float relN = Vector2.Dot(rb.velocity, -n);             // 벽 쪽으로 박는 속도
-        if (relN < pinballMinRelSpeed) return;
+        if (hitCoroutine != null)
+            StopCoroutine(hitCoroutine);
 
-        float kick = pinballBaseKick + relN * pinballKickBySpeed;
-        rb.AddForce(n * kick, ForceMode2D.Impulse);
-
-        ClampSpeed(rb, pinballMaxSpeed);
+        hitCoroutine = StartCoroutine(HitFlashCoroutine());
     }
 
-    // ✅ 적-적 충돌: 반사 + 킥, 그리고 A 방식 리다이렉트(내 몬스터만)
-    void PinballKickEnemyVsEnemy(Collision2D collision, Enemy other)
+    IEnumerator HitFlashCoroutine()
     {
-        if (other == null) return;
-
-        Rigidbody2D rb2 = other.GetComponent<Rigidbody2D>();
-        if (rb2 == null) return;
-        if (collision.contactCount == 0) return;
-
-        // ✅ 중복 처리 방지(한쪽에서만 계산)
-        bool iAmSolver = rb.GetInstanceID() < rb2.GetInstanceID();
-        if (!iAmSolver) return;
-
-        Vector2 n = collision.GetContact(0).normal.normalized; // other -> this
-
-        Vector2 v1 = rb.velocity;
-        Vector2 v2 = rb2.velocity;
-
-        Vector2 rel = v1 - v2;
-        float relToward = Vector2.Dot(rel, n); // 음수면 서로 박는 중
-        if (-relToward < pinballMinRelSpeed) return;
-
-        // 1) 반사(상대속도 기준)
-        Vector2 v1Rel = v1 - v2;
-        Vector2 v2Rel = v2 - v1;
-
-        Vector2 v1Ref = Vector2.Reflect(v1Rel, n) + v2;
-        Vector2 v2Ref = Vector2.Reflect(v2Rel, -n) + v1;
-
-        rb.velocity = v1Ref;
-        rb2.velocity = v2Ref;
-
-        // 2) 킥(임펄스)
-        float kick = pinballBaseKick + (-relToward) * pinballKickBySpeed;
-        if (IsLaunched() || other.IsLaunched()) kick *= 1.3f;
-
-        rb.AddForce(n * kick, ForceMode2D.Impulse);
-        rb2.AddForce(-n * kick, ForceMode2D.Impulse);
-
-        ClampSpeed(rb, pinballMaxSpeed);
-        ClampSpeed(rb2, pinballMaxSpeed);
-
-        // ✅ A: 내 몬스터(= 이 스크립트가 붙은 객체)만 "다음 몬스터"로 즉시 꺾기
-        // (solver가 나일 때만 실행되니까 중복 적용 없음)
-        RedirectThisVelocityToNextEnemy(other);
+        sr.color = Color.black;
+        yield return new WaitForSeconds(hitFlashTime);
+        sr.color = originalColor;
     }
-
-    // ✅ 다음 몬스터 방향으로 '내 속도 방향'만 즉시 변경
-    void RedirectThisVelocityToNextEnemy(Enemy excludeOther)
-    {
-        if (!chainRedirect) return;
-
-        float speed = rb.velocity.magnitude;
-        if (speed <= 0.01f) return;
-
-        // 가까운 Enemy 탐색 (자기 자신 + 방금 부딪힌 other 제외)
-        Collider2D[] hits = Physics2D.OverlapCircleAll(rb.position, redirectRadius, enemyMask);
-
-        Transform best = null;
-        float bestSqr = float.MaxValue;
-
-        for (int i = 0; i < hits.Length; i++)
-        {
-            Enemy e = hits[i].GetComponentInParent<Enemy>();
-            if (e == null) continue;
-            if (e == this) continue;
-            if (excludeOther != null && e == excludeOther) continue;
-
-            float d = ((Vector2)e.transform.position - rb.position).sqrMagnitude;
-            if (d < bestSqr)
-            {
-                bestSqr = d;
-                best = e.transform;
-            }
-        }
-
-        if (best == null) return;
-
-        Vector2 dir = ((Vector2)best.position - rb.position).normalized;
-
-        // 완전 강제(1) 또는 섞기(0~1)
-        Vector2 newDir = Vector2.Lerp(rb.velocity.normalized, dir, redirectBlend).normalized;
-
-        rb.velocity = newDir * speed; // ✅ 속도 유지, 방향만 변경
-    }
-
-    void ClampSpeed(Rigidbody2D target, float max)
-    {
-        float spd = target.velocity.magnitude;
-        if (spd > max)
-            target.velocity = target.velocity.normalized * max;
-    }
-
-    public bool IsLaunched() => Time.time - launchedTimer < launchedTime;
 
     void Die()
     {
         if (PlayerLevelSystem.Instance != null)
             PlayerLevelSystem.Instance.AddXP(xpReward);
 
-        if (spawner != null) spawner.OnEnemyDestroyed();
+        if (spawner != null)
+            spawner.OnEnemyDestroyed();
+
         Destroy(gameObject);
     }
+
+    public void SetSpawner(EnemySpawner s)
+    {
+        spawner = s;
+    }
+
+    void ApplySeparation()
+    {
+        if (isBoss) return;
+
+        Collider2D[] nearEnemies = Physics2D.OverlapCircleAll(
+            transform.position,
+            separationRadius,
+            LayerMask.GetMask("Enemy")
+        );
+
+        Vector2 pushDir = Vector2.zero;
+        int count = 0;
+
+        foreach (Collider2D col in nearEnemies)
+        {
+            if (col.gameObject == gameObject)
+                continue;
+
+            Vector2 dir = (Vector2)(transform.position - col.transform.position);
+            float distance = dir.magnitude;
+
+            if (distance <= 0.01f)
+                continue;
+
+            pushDir += dir.normalized / distance;
+            count++;
+        }
+
+        if (count > 0)
+        {
+            pushDir /= count;
+            rb.AddForce(pushDir * separationForce, ForceMode2D.Force);
+        }
 
 #if UNITY_EDITOR
     // 씬에서 리다이렉트 범위를 보고 싶으면 체크

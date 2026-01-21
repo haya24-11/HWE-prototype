@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿/*
+using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody2D), typeof(Collider2D))]
 public class Player : MonoBehaviour
@@ -104,3 +105,4 @@ public class Player : MonoBehaviour
         }
     }
 }
+*/
